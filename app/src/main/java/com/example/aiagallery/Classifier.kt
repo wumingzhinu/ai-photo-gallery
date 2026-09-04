@@ -24,8 +24,11 @@ object Classifier {
     fun init(context: Context) {
         if (isInitialized) return
         val model = context.assets.open(MODEL_PATH).use { it.readBytes() }
+        val buffer = java.nio.ByteBuffer.allocateDirect(model.size).order(java.nio.ByteOrder.nativeOrder())
+        buffer.put(model)
+        buffer.rewind()
         interpreter = Interpreter(
-            model,
+            buffer,
             Interpreter.Options().apply { numThreads = 4 }
         )
         labels = context.assets.open(LABELS_PATH).use { input ->
