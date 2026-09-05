@@ -28,15 +28,14 @@ object Classifier {
     private val output: Array<FloatArray> = Array(1) { FloatArray(1000) }
     private var pixels: IntArray = IntArray(INPUT_SIZE * INPUT_SIZE)
 
-    fun init(context: Context) {
+fun init(context: Context) {
         if (isInitialized) return
-        // Copy model from assets to cache dir, then use Interpreter(File)
+        // Always delete old cached model to avoid loading corrupted files from previous versions
         val modelFile = File(context.cacheDir, "model.tflite")
-        if (!modelFile.exists()) {
-            context.assets.open(MODEL_PATH).use { input ->
-                modelFile.outputStream().use { output ->
-                    input.copyTo(output)
-                }
+        modelFile.delete()
+        context.assets.open(MODEL_PATH).use { input ->
+            modelFile.outputStream().use { output ->
+                input.copyTo(output)
             }
         }
         interpreter = Interpreter(

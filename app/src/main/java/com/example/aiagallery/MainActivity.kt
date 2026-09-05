@@ -87,10 +87,10 @@ class MainActivity : AppCompatActivity() {
 
         scope.launch {
             try {
-                val items = withContext(Dispatchers.IO) {
-                    Classifier.init(applicationContext)
-                    scanAndClassify()
-                }
+                status.text = "正在加载AI模型..."
+                withContext(Dispatchers.IO) { Classifier.init(applicationContext) }
+                status.text = "模型已加载，正在扫描照片..."
+                val items = withContext(Dispatchers.IO) { scanAndClassify() }
 
                 adapter.submitList(items)
                 progress.visibility = View.GONE
