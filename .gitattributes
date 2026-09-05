@@ -1,0 +1,6 @@
+*.tflite binary
+*.tflite -text
+*.jpg binary
+*.png binary
+*.apk binary
+*.zip binary
