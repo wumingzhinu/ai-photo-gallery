@@ -83,7 +83,7 @@ class MainActivity : AppCompatActivity() {
         scope.launch {
             try {
                 withContext(Dispatchers.IO) { Classifier.init(applicationContext) }
-                status.text = "模型加载完成，正在扫描照片(最多$MAX_PHOTOS张)..."
+                status.text = "模型加载完成，正在扫描照片(最多${MAX_PHOTOS}张)..."
 
                 val result = withContext(Dispatchers.IO) { scanAndClassify() }
 
@@ -137,13 +137,13 @@ class MainActivity : AppCompatActivity() {
                     val classes = Classifier.classify(bmp)
                     bmp.recycle()
                     if (classes.isEmpty()) {
-                        errors.add("第$total张:分类结果为空")
+                        errors.add("第${total}张:分类结果为空")
                     } else {
                         val top = classes.first()
                         items.add(PhotoItem(uri.toString(), top.label, top.confidence))
                     }
                 } catch (e: Exception) {
-                    errors.add("第$total张:${e.message}")
+                    errors.add("第${total}张:${e.message}")
                 }
             }
         }
