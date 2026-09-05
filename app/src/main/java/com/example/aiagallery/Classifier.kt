@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import org.tensorflow.lite.Interpreter
 import java.io.BufferedReader
+import java.io.File
 import java.io.InputStreamReader
 
 data class Classification(
@@ -29,12 +30,17 @@ object Classifier {
 
     fun init(context: Context) {
         if (isInitialized) return
-        val model = context.assets.open(MODEL_PATH).use { it.readBytes() }
-        val buffer = java.nio.ByteBuffer.allocateDirect(model.size).order(java.nio.ByteOrder.nativeOrder())
-        buffer.put(model)
-        buffer.rewind()
+        // Copy model from assets to cache dir, then use Interpreter(File)
+        val modelFile = File(context.cacheDir, "model.tflite")
+        if (!modelFile.exists()) {
+            context.assets.open(MODEL_PATH).use { input ->
+                modelFile.outputStream().use { output ->
+                    input.copyTo(output)
+                }
+            }
+        }
         interpreter = Interpreter(
-            buffer,
+            modelFile,
             Interpreter.Options().apply { numThreads = 4 }
         )
         labels = context.assets.open(LABELS_PATH).use { input ->
