@@ -16,4 +16,5 @@ debug.keystore
 *.jks
 
 # Misc
-*.log*.apk
+*.log
+*.apk
