@@ -21,6 +21,12 @@ object Classifier {
     private var labels: List<String> = emptyList()
     private var isInitialized = false
 
+    // Reused buffers to reduce GC pressure during batch processing
+    private val input: Array<Array<Array<FloatArray>>> =
+        Array(1) { Array(INPUT_SIZE) { Array(INPUT_SIZE) { FloatArray(3) } } }
+    private val output: Array<FloatArray> = Array(1) { FloatArray(1000) }
+    private var pixels: IntArray = IntArray(INPUT_SIZE * INPUT_SIZE)
+
     fun init(context: Context) {
         if (isInitialized) return
         val model = context.assets.open(MODEL_PATH).use { it.readBytes() }
@@ -34,35 +40,33 @@ object Classifier {
         labels = context.assets.open(LABELS_PATH).use { input ->
             BufferedReader(InputStreamReader(input)).readLines()
         }
+        output[0] = FloatArray(labels.size)
         isInitialized = true
     }
 
     fun classify(bitmap: Bitmap): List<Classification> {
         val interpreter = interpreter ?: return emptyList()
         val resized = Bitmap.createScaledBitmap(bitmap, INPUT_SIZE, INPUT_SIZE, true)
-        val input = Array(1) { Array(INPUT_SIZE) { Array(INPUT_SIZE) { FloatArray(3) } } }
-        val pixels = IntArray(INPUT_SIZE * INPUT_SIZE)
-        resized.getPixels(pixels, 0, INPUT_SIZE, 0, 0, INPUT_SIZE, INPUT_SIZE)
-
-        for (i in 0 until INPUT_SIZE) {
-            for (j in 0 until INPUT_SIZE) {
-                val pixel = pixels[i * INPUT_SIZE + j]
-                // RGB normalized to [0, 1] for efficientnet_lite0
-                input[0][i][j][0] = ((pixel shr 16) and 0xFF) / 255.0f
-                input[0][i][j][1] = ((pixel shr 8) and 0xFF) / 255.0f
-                input[0][i][j][2] = (pixel and 0xFF) / 255.0f
+        try {
+            resized.getPixels(pixels, 0, INPUT_SIZE, 0, 0, INPUT_SIZE, INPUT_SIZE)
+            for (i in 0 until INPUT_SIZE) {
+                for (j in 0 until INPUT_SIZE) {
+                    val pixel = pixels[i * INPUT_SIZE + j]
+                    input[0][i][j][0] = ((pixel shr 16) and 0xFF) / 255.0f
+                    input[0][i][j][1] = ((pixel shr 8) and 0xFF) / 255.0f
+                    input[0][i][j][2] = (pixel and 0xFF) / 255.0f
+                }
             }
+            interpreter.run(input, output)
+            return output[0]
+                .mapIndexed { index, confidence ->
+                    Classification(labels.getOrElse(index) { index.toString() }, confidence)
+                }
+                .sortedByDescending { it.confidence }
+                .take(5)
+        } finally {
+            resized.recycle()
         }
-
-        val output = Array(1) { FloatArray(labels.size) }
-        interpreter.run(input, output)
-
-        return output[0]
-            .mapIndexed { index, confidence ->
-                Classification(labels.getOrElse(index) { index.toString() }, confidence)
-            }
-            .sortedByDescending { it.confidence }
-            .take(5)
     }
 
     fun close() {
