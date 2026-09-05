@@ -35,8 +35,6 @@ class MainActivity : AppCompatActivity() {
     private val scope = CoroutineScope(Dispatchers.Main)
     private val BASE_DIR = "Pictures/AIGallery"
 
-    private val WRITE_MEDIA_IMAGES = "android.permission.WRITE_MEDIA_IMAGES"
-
     private val permissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { results ->
             if (results.values.all { it }) {
@@ -69,15 +67,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun requiredPermissions(): Array<String> {
         return if (Build.VERSION.SDK_INT >= 33) {
-            arrayOf(
-                Manifest.permission.READ_MEDIA_IMAGES,
-                WRITE_MEDIA_IMAGES
-            )
-        } else if (Build.VERSION.SDK_INT >= 29) {
-            arrayOf(
-                Manifest.permission.READ_EXTERNAL_STORAGE,
-                Manifest.permission.WRITE_EXTERNAL_STORAGE
-            )
+            // Android 13+: 只需READ_MEDIA_IMAGES, WRITE_MEDIA_IMAGES自动授予
+            arrayOf(Manifest.permission.READ_MEDIA_IMAGES)
         } else {
             arrayOf(
                 Manifest.permission.READ_EXTERNAL_STORAGE,
