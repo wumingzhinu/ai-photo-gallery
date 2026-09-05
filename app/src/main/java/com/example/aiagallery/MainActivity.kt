@@ -20,6 +20,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 
 class MainActivity : AppCompatActivity() {
 
@@ -29,11 +30,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var scanButton: Button
     private lateinit var adapter: PhotoAdapter
     private val scope = CoroutineScope(Dispatchers.Main)
+    private val MAX_PHOTOS = 50
 
     private val permissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { results ->
-            val granted = results.values.any { it }
-            if (granted) {
+            if (results.values.any { it }) {
                 startClassification()
             } else {
                 showPermissionDenied()
@@ -53,29 +54,23 @@ class MainActivity : AppCompatActivity() {
         recycler.adapter = adapter
 
         scanButton.setOnClickListener {
-            val permissions = requiredPermissions()
-            val notGranted = permissions.filter {
+            val notGranted = requiredPermissions().filter {
                 ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
             }
-            if (notGranted.isEmpty()) {
-                startClassification()
-            } else {
-                permissionLauncher.launch(notGranted.toTypedArray())
-            }
+            if (notGranted.isEmpty()) startClassification()
+            else permissionLauncher.launch(notGranted.toTypedArray())
         }
     }
 
-    private fun requiredPermissions(): Array<String> {
-        return if (Build.VERSION.SDK_INT >= 33) {
-            arrayOf(Manifest.permission.READ_MEDIA_IMAGES)
-        } else {
-            arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
-        }
+    private fun requiredPermissions(): Array<String> = if (Build.VERSION.SDK_INT >= 33) {
+        arrayOf(Manifest.permission.READ_MEDIA_IMAGES)
+    } else {
+        arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
     }
 
     private fun showPermissionDenied() {
         status.visibility = View.VISIBLE
-        status.text = "未获得相册权限，无法扫描照片。请在设置中允许相册访问后重试。"
+        status.text = "未获得相册权限，请在设置中允许相册访问后重试。"
         scanButton.visibility = View.VISIBLE
     }
 
@@ -87,29 +82,39 @@ class MainActivity : AppCompatActivity() {
 
         scope.launch {
             try {
-                status.text = "正在加载AI模型..."
                 withContext(Dispatchers.IO) { Classifier.init(applicationContext) }
-                status.text = "模型已加载，正在扫描照片..."
-                val items = withContext(Dispatchers.IO) { scanAndClassify() }
+                status.text = "模型加载完成，正在扫描照片(最多$MAX_PHOTOS张)..."
 
-                adapter.submitList(items)
+                val result = withContext(Dispatchers.IO) { scanAndClassify() }
+
+                adapter.submitList(result.items)
                 progress.visibility = View.GONE
-                if (items.isEmpty()) {
-                    status.text = "未找到可分类的照片。请确认相册中有照片且已授权访问全部照片。"
-                } else {
-                    status.text = "已分类 ${items.size} 张照片"
+
+                val sb = StringBuilder()
+                sb.append("找到${result.total}张照片\n")
+                sb.append("成功分类${result.items.size}张\n")
+                if (result.errors.isNotEmpty()) {
+                    sb.append("错误: ${result.errors.first()}\n")
                 }
+                if (result.items.isEmpty()) {
+                    sb.append("请确认已授权「全部照片」权限")
+                }
+                status.text = sb.toString()
                 scanButton.visibility = View.VISIBLE
             } catch (e: Exception) {
                 progress.visibility = View.GONE
-                status.text = "分类出错：${e.message}"
+                status.text = "致命错误：${e.message}\n${e.stackTraceToString()}"
                 scanButton.visibility = View.VISIBLE
             }
         }
     }
 
-    private fun scanAndClassify(): List<PhotoItem> {
-        val result = mutableListOf<PhotoItem>()
+    data class ScanResult(val total: Int, val items: List<PhotoItem>, val errors: List<String>)
+
+    private fun scanAndClassify(): ScanResult {
+        val items = mutableListOf<PhotoItem>()
+        val errors = mutableListOf<String>()
+
         val collection = if (Build.VERSION.SDK_INT >= 29) {
             MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
         } else {
@@ -118,41 +123,46 @@ class MainActivity : AppCompatActivity() {
         val projection = arrayOf(MediaStore.Images.Media._ID)
         val sortOrder = "${MediaStore.Images.Media.DATE_ADDED} DESC"
 
-        val cursor = contentResolver.query(collection, projection, null, null, sortOrder) ?: return result
+        val cursor = contentResolver.query(collection, projection, null, null, sortOrder)
+            ?: return ScanResult(0, emptyList(), listOf("MediaStore查询返回null"))
+        var total = 0
         cursor.use { c ->
             val idCol = c.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
-            while (c.moveToNext()) {
+            while (c.moveToNext() && total < MAX_PHOTOS) {
+                total++
                 val id = c.getLong(idCol)
                 val uri = ContentUris.withAppendedId(collection, id)
                 try {
                     val bmp = loadBitmap(uri) ?: continue
                     val classes = Classifier.classify(bmp)
                     bmp.recycle()
-                    if (classes.isNotEmpty()) {
+                    if (classes.isEmpty()) {
+                        errors.add("第$total张:分类结果为空")
+                    } else {
                         val top = classes.first()
-                        result.add(PhotoItem(uri.toString(), top.label, top.confidence))
+                        items.add(PhotoItem(uri.toString(), top.label, top.confidence))
                     }
                 } catch (e: Exception) {
-                    // skip unreadable images
+                    errors.add("第$total张:${e.message}")
                 }
             }
         }
-        return result
+        return ScanResult(total, items, errors)
     }
 
     private fun loadBitmap(uri: Uri): android.graphics.Bitmap? {
         return try {
-            contentResolver.openInputStream(uri)?.use { ins ->
-                val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                android.graphics.BitmapFactory.decodeStream(ins, null, bounds)
-                var sample = 1
-                while (bounds.outWidth / sample > 512 || bounds.outHeight / sample > 512) sample *= 2
-                val opts = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
-                android.graphics.BitmapFactory.decodeStream(contentResolver.openInputStream(uri), null, opts)
+            val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            contentResolver.openInputStream(uri)?.use {
+                android.graphics.BitmapFactory.decodeStream(it, null, bounds)
             }
-        } catch (e: Exception) {
-            null
-        }
+            var sample = 1
+            while (bounds.outWidth / sample > 512 || bounds.outHeight / sample > 512) sample *= 2
+            contentResolver.openInputStream(uri)?.use {
+                android.graphics.BitmapFactory.decodeStream(it, null,
+                    android.graphics.BitmapFactory.Options().apply { inSampleSize = sample })
+            }
+        } catch (e: Exception) { null }
     }
 
     override fun onDestroy() {
