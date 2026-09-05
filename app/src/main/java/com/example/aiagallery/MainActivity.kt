@@ -35,6 +35,8 @@ class MainActivity : AppCompatActivity() {
     private val scope = CoroutineScope(Dispatchers.Main)
     private val BASE_DIR = "Pictures/AIGallery"
 
+    private val WRITE_MEDIA_IMAGES = "android.permission.WRITE_MEDIA_IMAGES"
+
     private val permissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { results ->
             if (results.values.all { it }) {
@@ -69,7 +71,7 @@ class MainActivity : AppCompatActivity() {
         return if (Build.VERSION.SDK_INT >= 33) {
             arrayOf(
                 Manifest.permission.READ_MEDIA_IMAGES,
-                Manifest.permission.WRITE_MEDIA_IMAGES
+                WRITE_MEDIA_IMAGES
             )
         } else if (Build.VERSION.SDK_INT >= 29) {
             arrayOf(
@@ -110,10 +112,10 @@ class MainActivity : AppCompatActivity() {
                 val sb = StringBuilder()
                 sb.append("扫描完成: 找到${result.total}张\n")
                 sb.append("已分类${result.items.size}张\n")
-                sb.append("已复制到${BASE_DIR}/\n")
+                sb.append("已移动到${BASE_DIR}/\n")
                 sb.append("共${result.categories.size}个分类\n")
                 for ((cat, count) in result.categories) {
-                    sb.append("  $cat: $count张\n")
+                    sb.append("  $cat: ${count}张\n")
                 }
                 if (result.errors.isNotEmpty()) {
                     sb.append("错误: ${result.errors.first()}")
@@ -162,16 +164,16 @@ class MainActivity : AppCompatActivity() {
                     val classes = Classifier.classify(bmp)
                     bmp.recycle()
                     if (classes.isEmpty()) {
-                        errors.add("第$total张:分类为空")
+                        errors.add("第${total}张:分类为空")
                         continue
                     }
                     val top = classes.first()
                     val category = sanitizeCategory(top.label)
                     items.add(PhotoItem(uri.toString(), top.label, top.confidence))
                     categories[category] = (categories[category] ?: 0) + 1
-                    copyToCategory(uri, category)
+                    moveToCategory(uri, category)
                 } catch (e: Exception) {
-                    errors.add("第$total张:${e.message}")
+                    errors.add("第${total}张:${e.message}")
                 }
             }
         }
@@ -186,7 +188,7 @@ class MainActivity : AppCompatActivity() {
             .ifEmpty { "other" }
     }
 
-    private fun copyToCategory(uri: Uri, category: String) {
+    private fun moveToCategory(uri: Uri, category: String) {
         val displayName = "IMG_${System.currentTimeMillis()}_${Math.random().toString().take(4)}"
         val relPath = "$BASE_DIR/$category"
 
@@ -203,6 +205,8 @@ class MainActivity : AppCompatActivity() {
                     input.copyTo(output)
                 }
             }
+            // 删除原文件
+            contentResolver.delete(uri, null, null)
         } else {
             val dir = File(android.os.Environment.getExternalStorageDirectory(), relPath)
             dir.mkdirs()
@@ -212,13 +216,15 @@ class MainActivity : AppCompatActivity() {
                     input.copyTo(output)
                 }
             }
-            // Add to MediaStore
+            // 加入MediaStore
             val values = ContentValues().apply {
                 put(MediaStore.Images.Media.DATA, file.absolutePath)
                 put(MediaStore.Images.Media.DISPLAY_NAME, file.name)
                 put(MediaStore.Images.Media.MIME_TYPE, "image/*")
             }
             contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+            // 删除原文件
+            contentResolver.delete(uri, null, null)
         }
     }
 
